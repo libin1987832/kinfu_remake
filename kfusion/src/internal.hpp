@@ -2,7 +2,7 @@
 
 #include <kfusion/cuda/device_array.hpp>
 #include "safe_call.hpp"
-
+#include <kfusion/types.hpp>
 //#define USE_DEPTH
 
 namespace kfusion
@@ -20,11 +20,21 @@ namespace kfusion
         typedef DeviceArray2D<Normal> Normals;
         typedef DeviceArray2D<Point> Points;
         typedef DeviceArray2D<uchar4> Image;
-
+		typedef DeviceArray2D<float> MapArr;
         typedef int3   Vec3i;
         typedef float3 Vec3f;
         struct Mat3f { float3 data[3]; };
         struct Aff3f { Mat3f R; Vec3f t; };
+		struct Mat33
+		{
+			float3 data[3];
+		};
+
+		//enum { VOLUME_X = 64, VOLUME_Y = 64, VOLUME_Z = 64 };
+
+
+		const float VOLUME_SIZE = 3.0f; // in meters
+
 
         struct TsdfVolume
         {
@@ -39,6 +49,9 @@ namespace kfusion
 
             TsdfVolume(elem_type* data, int3 dims, float3 voxel_size, float trunc_dist, int max_weight);
             //TsdfVolume(const TsdfVolume&);
+
+
+
 
             __kf_device__ elem_type* operator()(int x, int y, int z);
             __kf_device__ const elem_type* operator() (int x, int y, int z) const ;
@@ -133,13 +146,25 @@ namespace kfusion
         void renderImage(const Points& points, const Normals& normals, const Reprojector& reproj, const Vec3f& light_pose, Image& image);
         void renderTangentColors(const Normals& normals, Image& image);
 
+		
 
         //exctraction functionality
         size_t extractCloud(const TsdfVolume& volume, const Aff3f& aff, PtrSz<Point> output);
+		size_t extractCloud2(const TsdfVolume& volume, const Aff3f& aff, PtrSz<Point> output);
         void extractNormals(const TsdfVolume& volume, const PtrSz<Point>& points, const Aff3f& aff, const Mat3f& Rinv, float gradient_delta_factor, float4* output);
 
         struct float8  { float x, y, z, w, c1, c2, c3, c4; };
         struct float12 { float x, y, z, w, normal_x, normal_y, normal_z, n4, c1, c2, c3, c4; };
         void mergePointNormal(const DeviceArray<Point>& cloud, const DeviceArray<float8>& normals, const DeviceArray<float12>& output);
+
+
+		void updateColorVolume(const PtrStepSz<ushort>& dists, TsdfVolume& volume, const Aff3f& aff, const Projector& proj, PtrStep<uchar4> color_volume, const PtrStepSz<uchar3>& colors);
+		void initColorVolume(PtrStep<uchar4> color_volume, int V_X, int V_Y, int V_Z);
+		void exctractColors(const PtrStep<uchar4>& color_volume, const float3& volume_size, const PtrSz<Point>& points, uchar4* colors, int V_X, int V_Y, int V_Z);
+		template<class D, class Matx> D&
+			device_cast(Matx& matx)
+		{
+			return (*reinterpret_cast<D*>(matx.data()));
+		}
     }
 }

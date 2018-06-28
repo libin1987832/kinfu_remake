@@ -642,13 +642,201 @@ namespace kfusion
                     }
                 }
             }
+
+
+			__kf_device__ void
+				store_point_type(float x, float y, float z, float4* ptr) const {
+				*ptr = make_float4(x, y, z, 0);
+			}
+			__kf_device__ void
+				store_point_type(float x, float y, float z, float3* ptr) const {
+				*ptr = make_float3(x, y, z);
+			}
+
+			__kf_device__ void
+				operator () (PtrSz<Point> output, int VOLUME_X, int VOLUME_Y, int VOLUME_Z, float3 cell_size) const
+			{
+				int x = threadIdx.x + blockIdx.x * CTA_SIZE_X;
+				int y = threadIdx.y + blockIdx.y * CTA_SIZE_Y;
+
+#if __CUDA_ARCH__ < 200
+				__shared__ int cta_buffer[CTA_SIZE];
+#endif
+
+#if __CUDA_ARCH__ >= 120
+				if (__all(x >= VOLUME_X) || __all(y >= VOLUME_Y))
+					return;
+#else         
+				if (Emulation::All(x >= VOLUME_X, cta_buffer) ||
+					Emulation::All(y >= VOLUME_Y, cta_buffer))
+					return;
+#endif
+
+				float3 V;
+				V.x = (x + 0.5f) * cell_size.x;
+				V.y = (y + 0.5f) * cell_size.y;
+
+				int ftid = Block::flattenedThreadId();
+
+				for (int z = 0; z < VOLUME_Z - 1; ++z)
+				{
+					float3 points[MAX_LOCAL_POINTS];
+					int local_count = 0;
+
+					if (x < VOLUME_X && y < VOLUME_Y)
+					{
+						int W;
+						float F = fetch(x, y, z, W);
+
+						if (W != 0 && F != 1.f)
+						{
+							V.z = (z + 0.5f) * cell_size.z;
+
+							//process dx
+							if (x + 1 < VOLUME_X)
+							{
+								int Wn;
+								float Fn = fetch(x + 1, y, z, Wn);
+
+								if (Wn != 0 && Fn != 1.f)
+									if ((F > 0 && Fn < 0) || (F < 0 && Fn > 0))
+									{
+										float3 p;
+										p.y = V.y;
+										p.z = V.z;
+
+										float Vnx = V.x + cell_size.x;
+
+										float d_inv = 1.f / (fabs(F) + fabs(Fn));
+										p.x = (V.x * fabs(Fn) + Vnx * fabs(F)) * d_inv;
+
+										points[local_count++] = p;
+									}
+							}               /* if (x + 1 < VOLUME_X) */
+
+							//process dy
+							if (y + 1 < VOLUME_Y)
+							{
+								int Wn;
+								float Fn = fetch(x, y + 1, z, Wn);
+
+								if (Wn != 0 && Fn != 1.f)
+									if ((F > 0 && Fn < 0) || (F < 0 && Fn > 0))
+									{
+										float3 p;
+										p.x = V.x;
+										p.z = V.z;
+
+										float Vny = V.y + cell_size.y;
+
+										float d_inv = 1.f / (fabs(F) + fabs(Fn));
+										p.y = (V.y * fabs(Fn) + Vny * fabs(F)) * d_inv;
+
+										points[local_count++] = p;
+									}
+							}                /*  if (y + 1 < VOLUME_Y) */
+
+							//process dz
+							//if (z + 1 < VOLUME_Z) // guaranteed by loop
+			  {
+				  int Wn;
+				  float Fn = fetch(x, y, z + 1, Wn);
+
+				  if (Wn != 0 && Fn != 1.f)
+					  if ((F > 0 && Fn < 0) || (F < 0 && Fn > 0))
+					  {
+						  float3 p;
+						  p.x = V.x;
+						  p.y = V.y;
+
+						  float Vnz = V.z + cell_size.z;
+
+						  float d_inv = 1.f / (fabs(F) + fabs(Fn));
+						  p.z = (V.z * fabs(Fn) + Vnz * fabs(F)) * d_inv;
+
+						  points[local_count++] = p;
+					  }
+			  }               /* if (z + 1 < VOLUME_Z) */
+						}              /* if (W != 0 && F != 1.f) */
+					}            /* if (x < VOLUME_X && y < VOLUME_Y) */
+
+
+#if __CUDA_ARCH__ >= 200
+					///not we fulfilled points array at current iteration
+					int total_warp = __popc(__ballot(local_count > 0)) + __popc(__ballot(local_count > 1)) + __popc(__ballot(local_count > 2));
+#else
+					int tid = Block::flattenedThreadId();
+					cta_buffer[tid] = local_count;
+					int total_warp = Emulation::warp_reduce(cta_buffer, tid);
+#endif
+					__shared__ float storage_X[CTA_SIZE * MAX_LOCAL_POINTS];
+					__shared__ float storage_Y[CTA_SIZE * MAX_LOCAL_POINTS];
+					__shared__ float storage_Z[CTA_SIZE * MAX_LOCAL_POINTS];
+					if (total_warp > 0)
+					{
+						int lane = Warp::laneId();
+						int storage_index = (ftid >> Warp::LOG_WARP_SIZE) * Warp::WARP_SIZE * MAX_LOCAL_POINTS;
+
+						volatile int* cta_buffer = (int*)(storage_X + storage_index);
+
+						cta_buffer[lane] = local_count;
+						int offset = scan_warp<exclusive>(cta_buffer, lane);
+
+						if (lane == 0)
+						{
+							int old_global_count = atomicAdd(&global_count, total_warp);
+							cta_buffer[0] = old_global_count;
+						}
+						int old_global_count = cta_buffer[0];
+
+						for (int l = 0; l < local_count; ++l)
+						{
+							storage_X[storage_index + offset + l] = points[l].x;
+							storage_Y[storage_index + offset + l] = points[l].y;
+							storage_Z[storage_index + offset + l] = points[l].z;
+						}
+
+						Point *pos = output.data + old_global_count + lane;
+						for (int idx = lane; idx < total_warp; idx += Warp::STRIDE, pos += Warp::STRIDE)
+						{
+							float x = storage_X[storage_index + idx];
+							float y = storage_Y[storage_index + idx];
+							float z = storage_Z[storage_index + idx];
+							store_point_type(x, y, z, pos);
+						}
+
+						bool full = (old_global_count + total_warp) >= output.size;
+
+						if (full)
+							break;
+					}
+
+				}         /* for(int z = 0; z < VOLUME_Z - 1; ++z) */
+
+
+				///////////////////////////
+				// prepare for future scans
+				if (ftid == 0)
+				{
+					unsigned int total_blocks = gridDim.x * gridDim.y * gridDim.z;
+					unsigned int value = atomicInc(&blocks_done, total_blocks);
+
+					//last block
+					if (value == total_blocks - 1)
+					{
+						output_count = min((int)output.size, global_count);
+						blocks_done = 0;
+						global_count = 0;
+					}
+				}
+			}       /* operator() */
         };
 
 
 
         __global__ void extract_kernel(const FullScan6 fs, PtrSz<Point> output) { fs(output); }
 
-
+		__global__ void extract_kernel2(const FullScan6 fs, PtrSz<Point> output) { fs(output, fs.volume.dims.x, fs.volume.dims.y, fs.volume.dims.z,fs.volume.voxel_size); }
 
         struct ExtractNormals
         {
@@ -752,6 +940,27 @@ size_t kfusion::device::extractCloud (const TsdfVolume& volume, const Aff3f& aff
     cudaSafeCall ( cudaMemcpyFromSymbol (&size, output_count, sizeof(size)) );
     return (size_t)size;
 }
+
+
+
+size_t kfusion::device::extractCloud2(const TsdfVolume& volume, const Aff3f& aff, PtrSz<Point> output)
+{
+	typedef FullScan6 FS;
+	FS fs(volume);
+	fs.aff = aff;
+
+	dim3 block(FS::CTA_SIZE_X, FS::CTA_SIZE_Y);
+	dim3 grid(divUp(volume.dims.x, block.x), divUp(volume.dims.y, block.y));
+
+	extract_kernel2 << <grid, block >> >(fs, output);
+	cudaSafeCall(cudaGetLastError());
+	cudaSafeCall(cudaDeviceSynchronize());
+
+	int size;
+	cudaSafeCall(cudaMemcpyFromSymbol(&size, output_count, sizeof(size)));
+	return (size_t)size;
+}
+
 
 void kfusion::device::extractNormals (const TsdfVolume& volume, const PtrSz<Point>& points, const Aff3f& aff, const Mat3f& Rinv, float gradient_delta_factor, float4* output)
 {

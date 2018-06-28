@@ -59,7 +59,7 @@ namespace kfusion
         typedef cuda::DeviceArray2D<RGB> Image;
         typedef cuda::DeviceArray2D<Normal> Normals;
         typedef cuda::DeviceArray2D<Point> Cloud;
-
+		typedef cuda::DeviceArray2D<PixelRGB> ImageRGB;
         struct Frame
         {
             bool use_points;

@@ -2,6 +2,7 @@
 
 #include <kfusion/types.hpp>
 #include <kfusion/cuda/tsdf_volume.hpp>
+#include <color_volume.h>
 #include <kfusion/cuda/projective_icp.hpp>
 #include <vector>
 #include <string>
@@ -64,15 +65,19 @@ namespace kfusion
         const cuda::TsdfVolume& tsdf() const;
         cuda::TsdfVolume& tsdf();
 
+		const cuda::ColorVolume& color_tsdf() const;
+		cuda::ColorVolume& color_tsdf();
+
         const cuda::ProjectiveICP& icp() const;
         cuda::ProjectiveICP& icp();
 
         void reset();
 
-        bool operator()(const cuda::Depth& dpeth, const cuda::Image& image = cuda::Image());
-
+        bool operator()(const cuda::Depth& dpeth);
+		bool operator()(const cuda::Depth& dpeth, const cuda::ImageRGB& image);
         void renderImage(cuda::Image& image, int flags = 0);
         void renderImage(cuda::Image& image, const Affine3f& pose, int flags = 0);
+		void initColorIntegration(int max_weight);
 
         Affine3f getCameraPose (int time = -1) const;
     private:
@@ -91,6 +96,7 @@ namespace kfusion
         cuda::Depth depths_;
 
         cv::Ptr<cuda::TsdfVolume> volume_;
+		cv::Ptr<cuda::ColorVolume> color_volume_;
         cv::Ptr<cuda::ProjectiveICP> icp_;
     };
 }

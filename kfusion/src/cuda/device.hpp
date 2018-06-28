@@ -89,6 +89,13 @@ namespace kfusion
 
         template<> __kf_device__ ushort2 gmem::LdCs(ushort2* ptr);
         template<> __kf_device__ void gmem::StCs(const ushort2& val, ushort2* ptr);
+
+
+		__device__ __forceinline__ float3
+			operator* (const Mat33& m, const float3& vec)
+		{
+			return make_float3 (dot (m.data[0], vec), dot (m.data[1], vec), dot (m.data[2], vec));
+		}
     }
 }
 

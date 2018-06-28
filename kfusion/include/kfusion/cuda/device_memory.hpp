@@ -90,7 +90,7 @@ namespace kfusion
         private:
             /** \brief Device pointer. */
             void *data_;
-
+			void *color_data_;
             /** \brief Allocated size in bytes. */
             size_t sizeBytes_;
 

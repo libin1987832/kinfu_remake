@@ -1,9 +1,14 @@
 #pragma once
-
+//#include <windows.h>
+//#include "NuiApi.h"
 #include <kfusion/kinfu.hpp>
 #include <opencv2/core/core.hpp>
 #include <string>
-
+enum TYPE
+{
+	FIFE_PICTURE,
+	FIFE_ONI
+};
 namespace kfusion
 {
     class KF_EXPORTS OpenNISource
@@ -15,10 +20,10 @@ namespace kfusion
 
         OpenNISource();
         OpenNISource(int device);
-        OpenNISource(const std::string& oni_filename, bool repeat = false);
+		OpenNISource(const std::string& oni_filename, bool repeat = false, TYPE type=FIFE_ONI);
 
-        void open(int device);
-        void open(const std::string& oni_filename, bool repeat = false);
+		void open(int device);
+		void open(const std::string& oni_filename, bool repeat = false, TYPE type = FIFE_ONI);
         void release();
 
         ~OpenNISource();
@@ -32,11 +37,24 @@ namespace kfusion
         double pixelSize;             // mm
         unsigned short max_depth;     // mm
 
+		TYPE fileType;
+		int m_current_frame;
         bool setRegistration (bool value = false);
     private:
         struct Impl;
         cv::Ptr<Impl> impl_;
         void getParams ();
+	/*	INuiSensor*                         m_pNuiSensor;
 
+		HANDLE                              m_hNextDepthFrameEvent;
+		HANDLE                              m_pDepthStreamHandle;
+		HANDLE                              m_hNextColorFrameEvent;
+		HANDLE                              m_pColorStreamHandle;
+		bool                                m_bNearMode;
+
+		static const NUI_IMAGE_RESOLUTION   cDepthResolution = NUI_IMAGE_RESOLUTION_640x480;
+		static const NUI_IMAGE_RESOLUTION   cColorResolution = NUI_IMAGE_RESOLUTION_640x480;
+		bool                                m_bDepthReceived;
+		bool                                m_bColorReceived;*/
     };
 }

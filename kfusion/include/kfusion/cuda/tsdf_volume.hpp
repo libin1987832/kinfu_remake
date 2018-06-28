@@ -1,7 +1,7 @@
 #pragma once
 
 #include <kfusion/types.hpp>
-
+#include <color_volume.h>
 namespace kfusion
 {
     namespace cuda
@@ -44,14 +44,20 @@ namespace kfusion
             virtual void clear();
             virtual void applyAffine(const Affine3f& affine);
             virtual void integrate(const Dists& dists, const Affine3f& camera_pose, const Intr& intr);
+
+
+			void integrateColor(const Dists& dists, const Affine3f& camera_pose, const Intr& intr, const kfusion::cuda::ImageRGB& image, kfusion::cuda::ColorVolume& color_volume_);
             virtual void raycast(const Affine3f& camera_pose, const Intr& intr, Depth& depth, Normals& normals);
             virtual void raycast(const Affine3f& camera_pose, const Intr& intr, Cloud& points, Normals& normals);
 
             void swap(CudaData& data);
 
             DeviceArray<Point> fetchCloud(DeviceArray<Point>& cloud_buffer) const;
+			DeviceArray<Point> fetchCloud2(DeviceArray<Point>& cloud_buffer) const;
             void fetchNormals(const DeviceArray<Point>& cloud, DeviceArray<Normal>& normals) const;
 
+			void save_volume(const std::string &file_name);
+			void save_ply(const std::string& fileName);
             struct Entry
             {
                 typedef unsigned short half;

@@ -18,16 +18,16 @@ kfusion::KinFuParams kfusion::KinFuParams::default_params()
     p.rows = 480;  //pixels
     p.intr = Intr(525.f, 525.f, p.cols/2 - 0.5f, p.rows/2 - 0.5f);
 
-    p.volume_dims = Vec3i::all(512);  //number of voxels
-    p.volume_size = Vec3f::all(3.f);  //meters
+    p.volume_dims = Vec3i::all(1024);  //number of voxels
+    p.volume_size = Vec3f::all(2.f);  //meters
     p.volume_pose = Affine3f().translate(Vec3f(-p.volume_size[0]/2, -p.volume_size[1]/2, 0.5f));
 
-    p.bilateral_sigma_depth = 0.04f;  //meter
+    p.bilateral_sigma_depth = 0.01f;  //meter
     p.bilateral_sigma_spatial = 4.5; //pixels
     p.bilateral_kernel_size = 7;     //pixels
 
     p.icp_truncate_depth_dist = 0.f;        //meters, disabled
-    p.icp_dist_thres = 0.1f;                //meters
+    p.icp_dist_thres = 0.01f;                //meters
     p.icp_angle_thres = deg2rad(30.f); //radians
     p.icp_iter_num.assign(iters, iters + levels);
 
@@ -78,6 +78,18 @@ const kfusion::cuda::TsdfVolume& kfusion::KinFu::tsdf() const
 kfusion::cuda::TsdfVolume& kfusion::KinFu::tsdf()
 { return *volume_; }
 
+
+const kfusion::cuda::ColorVolume& kfusion::KinFu::color_tsdf() const
+{
+	return *color_volume_;
+}
+
+kfusion::cuda::ColorVolume& kfusion::KinFu::color_tsdf()
+{
+	return *color_volume_;
+}
+
+
 const kfusion::cuda::ProjectiveICP& kfusion::KinFu::icp() const
 { return *icp_; }
 
@@ -119,6 +131,8 @@ void kfusion::KinFu::allocate_buffers()
     depths_.create(params_.rows, params_.cols);
     normals_.create(params_.rows, params_.cols);
     points_.create(params_.rows, params_.cols);
+
+	
 }
 
 void kfusion::KinFu::reset()
@@ -139,8 +153,25 @@ kfusion::Affine3f kfusion::KinFu::getCameraPose (int time) const
         time = (int)poses_.size () - 1;
     return poses_[time];
 }
+bool kfusion::KinFu::operator()(const kfusion::cuda::Depth& depth, const kfusion::cuda::ImageRGB& image)
+{
+	bool res = (*this)(depth);
 
-bool kfusion::KinFu::operator()(const kfusion::cuda::Depth& depth, const kfusion::cuda::Image& /*image*/)
+	if (res && color_volume_)
+	{
+		using namespace device;
+		const KinFuParams& p = params_;
+		volume_->integrateColor(dists_, poses_.back(), p.intr,image,*color_volume_);
+	}
+
+	return res;
+}
+void
+kfusion::KinFu::initColorIntegration(int max_weight)
+{
+	color_volume_ = kfusion::cuda::ColorVolume::Ptr(new ColorVolume(*volume_, max_weight));
+}
+bool kfusion::KinFu::operator()(const kfusion::cuda::Depth& depth)
 {
     const KinFuParams& p = params_;
     const int LEVELS = icp_->getUsedLevelsNum();
